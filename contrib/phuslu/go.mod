@@ -1,6 +1,6 @@
 module github.com/gopherex/xlog/contrib/phuslu
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/gopherex/xlog v0.0.0

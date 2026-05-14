@@ -465,3 +465,130 @@ func TestWithoutPrettyOverridesEnv(t *testing.T) {
 		t.Fatalf("WithoutPretty should force raw JSON: %q", out.String())
 	}
 }
+
+func TestAppendNameChain(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out)).AppendName("api").AppendName("auth")
+	if got := logger.Name(); got != "api.auth" {
+		t.Fatalf("name = %q", got)
+	}
+	logger.Info("hi")
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got[xlog.FieldLogger] != "api.auth" {
+		t.Fatalf("logger field = %#v", got[xlog.FieldLogger])
+	}
+}
+
+func TestLoggerEmptyNameNoField(t *testing.T) {
+	var out bytes.Buffer
+	xlog.NewJSON(xlog.WithWriter(&out)).Info("hi")
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := got[xlog.FieldLogger]; ok {
+		t.Fatalf("logger field should be absent: %#v", got)
+	}
+}
+
+func TestAppendNameEmptySubReturnsReceiver(t *testing.T) {
+	l := xlog.NewJSON().AppendName("api")
+	if l.AppendName("").Name() != "api" {
+		t.Fatalf("empty sub should leave name alone")
+	}
+}
+
+func TestAppendNameBranchIsolation(t *testing.T) {
+	root := xlog.NewJSON().AppendName("api")
+	db := root.AppendName("db")
+	auth := root.AppendName("auth")
+	deeper := db.AppendName("query")
+
+	if root.Name() != "api" {
+		t.Fatalf("root mutated: %q", root.Name())
+	}
+	if db.Name() != "api.db" {
+		t.Fatalf("db = %q", db.Name())
+	}
+	if auth.Name() != "api.auth" {
+		t.Fatalf("auth = %q", auth.Name())
+	}
+	if deeper.Name() != "api.db.query" {
+		t.Fatalf("deeper = %q", deeper.Name())
+	}
+}
+
+func TestWithThenAppendNameKeepsParentName(t *testing.T) {
+	root := xlog.NewJSON().AppendName("api")
+	branch := root.With(xlog.String("k", "v")).AppendName("auth")
+	if root.Name() != "api" {
+		t.Fatalf("root mutated: %q", root.Name())
+	}
+	if branch.Name() != "api.auth" {
+		t.Fatalf("branch = %q", branch.Name())
+	}
+}
+
+func TestPrependName(t *testing.T) {
+	l := xlog.NewJSON().AppendName("api").AppendName("db")
+	root := l.PrependName("main")
+	if root.Name() != "main.api.db" {
+		t.Fatalf("name = %q", root.Name())
+	}
+	if l.Name() != "api.db" {
+		t.Fatalf("parent mutated: %q", l.Name())
+	}
+}
+
+func TestPrependNameOnUnnamed(t *testing.T) {
+	l := xlog.NewJSON().PrependName("main")
+	if l.Name() != "main" {
+		t.Fatalf("name = %q", l.Name())
+	}
+}
+
+func TestReplaceName(t *testing.T) {
+	l := xlog.NewJSON().AppendName("api").AppendName("db").ReplaceName("worker")
+	if l.Name() != "worker" {
+		t.Fatalf("name = %q", l.Name())
+	}
+}
+
+func TestReplaceNameClear(t *testing.T) {
+	l := xlog.NewJSON().AppendName("api").ReplaceName("")
+	if l.Name() != "" {
+		t.Fatalf("name = %q", l.Name())
+	}
+}
+
+func TestLoggerLogMethodDispatchesByLevel(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithLevel(xlog.DebugLevel))
+	logger.Log(xlog.WarnLevel, "warned", xlog.String("k", "v"))
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got[xlog.FieldLevel] != "warn" || got["msg"] != "warned" || got["k"] != "v" {
+		t.Fatalf("log = %#v", got)
+	}
+}
+
+func TestLogDoesNotMutateCallerSlice(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithCaller(true)).AppendName("api")
+	src := make([]xlog.Field, 1, 8) // cap > len so append won't realloc
+	src[0] = xlog.String("a", "1")
+
+	logger.Info("hi", src...)
+
+	if len(src) != 1 {
+		t.Fatalf("caller slice mutated: len=%d", len(src))
+	}
+}

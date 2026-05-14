@@ -1,6 +1,6 @@
 module github.com/gopherex/xlog
 
-go 1.22
+go 1.25.0
 
 require github.com/go-faster/jx v1.1.0
 

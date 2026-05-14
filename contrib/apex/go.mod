@@ -1,6 +1,6 @@
 module github.com/gopherex/xlog/contrib/apex
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/apex/log v1.9.0

@@ -23,7 +23,7 @@ contrib/<name>/      opt-in adapters with their own go.mod
 go get github.com/gopherex/xlog
 ```
 
-Minimum Go: 1.22.
+Minimum Go: 1.25.0.
 
 ## Quick start
 
@@ -231,20 +231,42 @@ logger.Info("started", xlog.String("service", "api"))
 
 ### Available contribs
 
-| Path                                          | Wraps                                       |
-|-----------------------------------------------|---------------------------------------------|
-| `github.com/gopherex/xlog/contrib/slog`       | stdlib `log/slog`                           |
-| `github.com/gopherex/xlog/contrib/zap`        | `go.uber.org/zap`                           |
-| `github.com/gopherex/xlog/contrib/zerolog`    | `github.com/rs/zerolog`                     |
-| `github.com/gopherex/xlog/contrib/logrus`     | `github.com/sirupsen/logrus`                |
-| `github.com/gopherex/xlog/contrib/hclog`      | `github.com/hashicorp/go-hclog`             |
-| `github.com/gopherex/xlog/contrib/gokit`      | `github.com/go-kit/log`                     |
-| `github.com/gopherex/xlog/contrib/apex`       | `github.com/apex/log`                       |
-| `github.com/gopherex/xlog/contrib/phuslu`     | `github.com/phuslu/log`                     |
-| `github.com/gopherex/xlog/contrib/charm`      | `github.com/charmbracelet/log`              |
-| `github.com/gopherex/xlog/contrib/log15`      | `gopkg.in/inconshreveable/log15.v2`         |
+Each contrib is its own Go module — `go get` pulls only what you use. Both
+directions are supported: use xlog through a native backend (`New`), or expose
+xlog where the native logger's API is expected (`NewSink…`).
 
-Each contrib is its own module — `go get` pulls only what you use.
+| Path                                       | Forward (xlog uses native)       | Reverse (native uses xlog)         |
+|--------------------------------------------|----------------------------------|------------------------------------|
+| `…/contrib/slog`     (`log/slog`)          | `slog.New(handler)`              | `slog.NewSink(l) slog.Handler`     |
+| `…/contrib/zap`      (`go.uber.org/zap`)   | `zap.New(zl)`                    | `zap.NewSink(l) zapcore.Core`      |
+| `…/contrib/zerolog`  (`rs/zerolog`)        | `zerolog.New(zl)`                | `zerolog.NewSinkWriter(l) io.Writer` |
+| `…/contrib/logrus`   (`sirupsen/logrus`)   | `logrus.New(lr)`                 | `logrus.NewSinkHook(l) logrus.Hook` |
+| `…/contrib/hclog`    (`hashicorp/go-hclog`) | `hclog.New(hc)`                 | `hclog.NewSinkWriter(l) io.Writer` |
+| `…/contrib/gokit`    (`go-kit/log`)        | `gokit.New(kl)`                  | `gokit.NewSink(l) kitlog.Logger`   |
+| `…/contrib/apex`     (`apex/log`)          | `apex.New(al)`                   | `apex.NewSinkHandler(l) apexlog.Handler` |
+| `…/contrib/phuslu`   (`phuslu/log`)        | `phuslu.New(pl)`                 | `phuslu.NewSinkWriter(l) io.Writer` |
+| `…/contrib/charm`    (`charmbracelet/log`) | `charm.New(cl)`                  | `charm.NewSinkWriter(l) io.Writer` |
+| `…/contrib/log15`    (`inconshreveable/log15.v2`) | `log15.New(l15)`          | `log15.NewSinkHandler(l) l15.Handler` |
+
+Forward example — xlog facade, zap backend:
+
+```go
+zl := uzap.NewExample()
+logger := xlog.New(zapcontrib.New(zl))
+logger.Info("hi", xlog.String("k", "v"))
+```
+
+Reverse example — zap callers, xlog backend:
+
+```go
+xl := xlog.NewJSON()
+zl := uzap.New(zapcontrib.NewSink(xl))
+zl.Info("hi", uzap.String("k", "v")) // xl receives it
+```
+
+Libraries without a structured hook surface (zerolog, phuslu, charm, hclog)
+expose `NewSinkWriter` — plug it into the native logger's `io.Writer`
+configured for JSON; the writer reparses each line into an xlog event.
 
 ### Writing your own adapter
 

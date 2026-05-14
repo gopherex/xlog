@@ -74,6 +74,21 @@ var (
 	CustomFn = xfield.CustomFunc
 )
 
+// ParseLevel parses "debug" | "info" | "warn" | "warning" | "error" | "err" (case-insensitive).
+func ParseLevel(s string) (Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug":
+		return DebugLevel, nil
+	case "info":
+		return InfoLevel, nil
+	case "warn", "warning":
+		return WarnLevel, nil
+	case "error", "err":
+		return ErrorLevel, nil
+	}
+	return InfoLevel, errors.New("xlog: unknown level " + strconv.Quote(s))
+}
+
 func NewAtomicLevel(level Level) *AtomicLevel { return xcore.NewAtomicLevel(level) }
 func NewFilterCore(next Core, leveler LevelEnabler) Core {
 	return xcore.NewFilterCore(next, leveler)
@@ -97,6 +112,7 @@ func Generic[T any](key string, value T, append xfield.AppendFunc[T]) Field {
 // ---- Logger ------------------------------------------------------------
 
 type Logger struct {
+	name            string
 	core            Core
 	caller          bool
 	callerSkip      int
@@ -104,11 +120,21 @@ type Logger struct {
 	stacktraceLevel Level
 }
 
+// New constructs a Logger. The name is optional and can be set or extended
+// later with Named, zap-style.
 func New(core Core) *Logger {
 	if core == nil {
 		core = NopCore{}
 	}
 	return &Logger{core: core}
+}
+
+// Name returns the dotted logger name, or "" if unnamed.
+func (l *Logger) Name() string {
+	if l == nil {
+		return ""
+	}
+	return l.name
 }
 
 func (l *Logger) Core() Core {
@@ -129,11 +155,48 @@ func (l *Logger) With(fields ...Field) *Logger {
 	return next
 }
 
-func (l *Logger) Named(name string) *Logger {
-	if name == "" {
+// AppendName returns a child whose name is parent.name + "." + sub.
+// Example: logger("api").AppendName("db") → "api.db".
+// Empty sub returns the receiver unchanged.
+func (l *Logger) AppendName(sub string) *Logger {
+	if l == nil || sub == "" {
 		return l
 	}
-	return l.With(String(FieldLogger, name))
+	next := l.clone()
+	if next.name == "" {
+		next.name = sub
+	} else {
+		next.name = next.name + "." + sub
+	}
+	return next
+}
+
+// PrependName returns a child whose name is prefix + "." + parent.name.
+// Useful for stamping an app-level root on top of a component-named logger
+// (e.g. component owns "api.db", app prepends "main" → "main.api.db").
+// Empty prefix returns the receiver unchanged.
+func (l *Logger) PrependName(prefix string) *Logger {
+	if l == nil || prefix == "" {
+		return l
+	}
+	next := l.clone()
+	if next.name == "" {
+		next.name = prefix
+	} else {
+		next.name = prefix + "." + next.name
+	}
+	return next
+}
+
+// ReplaceName returns a child with name set to name, discarding any existing
+// chain. Pass "" to clear the name entirely.
+func (l *Logger) ReplaceName(name string) *Logger {
+	if l == nil {
+		return l
+	}
+	next := l.clone()
+	next.name = name
+	return next
 }
 
 func (l *Logger) Sync() error { return l.Core().Sync() }
@@ -143,13 +206,51 @@ func (l *Logger) Info(msg string, fields ...Field)  { l.log(InfoLevel, msg, fiel
 func (l *Logger) Warn(msg string, fields ...Field)  { l.log(WarnLevel, msg, fields) }
 func (l *Logger) Error(msg string, fields ...Field) { l.log(ErrorLevel, msg, fields) }
 
+// Log writes at the given level. Primary entry point for adapters that map an
+// external level enum onto xlog at runtime.
+func (l *Logger) Log(level Level, msg string, fields ...Field) { l.log(level, msg, fields) }
+
 func (l *Logger) log(level Level, msg string, fields []Field) {
 	c := l.Core()
 	if !c.Enabled(level) {
 		return
 	}
-	fields = l.enrichFields(level, fields)
+	fields = l.attachExtras(level, fields)
 	_ = c.Write(Event{Level: level, Message: msg, Fields: fields})
+}
+
+// attachExtras returns fields plus any logger-level enrichment (name, caller,
+// stacktrace). It always returns a fresh slice when extras exist, so the
+// caller's underlying array is never mutated.
+func (l *Logger) attachExtras(level Level, fields []Field) []Field {
+	if l == nil {
+		return fields
+	}
+	extras := 0
+	if l.name != "" {
+		extras++
+	}
+	if l.caller {
+		extras++
+	}
+	if l.stacktrace && level >= l.stacktraceLevel {
+		extras++
+	}
+	if extras == 0 {
+		return fields
+	}
+	out := make([]Field, len(fields), len(fields)+extras)
+	copy(out, fields)
+	if l.name != "" {
+		out = append(out, String(FieldLogger, l.name))
+	}
+	if l.caller {
+		out = append(out, String("caller", callerString(l.callerSkip+3)))
+	}
+	if l.stacktrace && level >= l.stacktraceLevel {
+		out = append(out, String("stacktrace", string(debug.Stack())))
+	}
+	return out
 }
 
 func (l *Logger) clone() *Logger {
@@ -158,19 +259,6 @@ func (l *Logger) clone() *Logger {
 	}
 	next := *l
 	return &next
-}
-
-func (l *Logger) enrichFields(level Level, fields []Field) []Field {
-	if l == nil {
-		return fields
-	}
-	if l.caller {
-		fields = append(fields, String("caller", callerString(l.callerSkip+2)))
-	}
-	if l.stacktrace && level >= l.stacktraceLevel {
-		fields = append(fields, String("stacktrace", string(debug.Stack())))
-	}
-	return fields
 }
 
 func callerString(skip int) string {
@@ -191,6 +279,7 @@ func callerString(skip int) string {
 
 type CheckedEntry struct {
 	core            Core
+	name            string
 	level           Level
 	message         string
 	caller          bool
@@ -206,6 +295,7 @@ func (l *Logger) Check(level Level, msg string) *CheckedEntry {
 	}
 	return &CheckedEntry{
 		core:            c,
+		name:            l.name,
 		level:           level,
 		message:         msg,
 		caller:          l.caller,
@@ -219,11 +309,29 @@ func (e *CheckedEntry) Write(fields ...Field) {
 	if e == nil || e.core == nil {
 		return
 	}
+	extras := 0
+	if e.name != "" {
+		extras++
+	}
 	if e.caller {
-		fields = append(fields, String("caller", callerString(e.callerSkip+2)))
+		extras++
 	}
 	if e.stacktrace && e.level >= e.stacktraceLevel {
-		fields = append(fields, String("stacktrace", string(debug.Stack())))
+		extras++
+	}
+	if extras > 0 {
+		out := make([]Field, len(fields), len(fields)+extras)
+		copy(out, fields)
+		if e.name != "" {
+			out = append(out, String(FieldLogger, e.name))
+		}
+		if e.caller {
+			out = append(out, String("caller", callerString(e.callerSkip+2)))
+		}
+		if e.stacktrace && e.level >= e.stacktraceLevel {
+			out = append(out, String("stacktrace", string(debug.Stack())))
+		}
+		fields = out
 	}
 	_ = e.core.Write(Event{Level: e.level, Message: e.message, Fields: fields})
 }
@@ -389,9 +497,13 @@ func DefaultConfig() Config {
 	return Config{Level: InfoLevel, Writer: os.Stdout, Clock: time.Now}
 }
 
+// Default returns a JSON logger at info level writing to stdout.
 func Default() *Logger { return NewJSON() }
 
-func NewJSON(opts ...Option) *Logger    { return newLogger("json", opts...) }
+// NewJSON constructs a JSON-backed Logger. Use Named to set/extend the name.
+func NewJSON(opts ...Option) *Logger { return newLogger("json", opts...) }
+
+// NewConsole constructs a human-readable Logger. Use Named to set/extend the name.
 func NewConsole(opts ...Option) *Logger { return newLogger("console", opts...) }
 
 func newLogger(format string, opts ...Option) *Logger {

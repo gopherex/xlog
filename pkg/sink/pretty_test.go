@@ -71,3 +71,13 @@ func TestPrettyColorsByLevel(t *testing.T) {
 		}
 	}
 }
+
+func TestPrettyBoundedBuffer(t *testing.T) {
+	var out bytes.Buffer
+	w := sink.NewPretty(&out)
+	_, _ = w.Write(bytes.Repeat([]byte("x"), 2<<20)) // 2 MiB no newline
+	_, _ = w.Write([]byte(`{"level":"info","msg":"after"}` + "\n"))
+	if !strings.Contains(out.String(), "after") {
+		t.Fatalf("out = %q", out.String())
+	}
+}

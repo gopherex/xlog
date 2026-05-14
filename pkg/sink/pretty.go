@@ -10,6 +10,11 @@ import (
 	"sync"
 )
 
+// maxSinkLineBytes caps the in-memory buffer for partial NDJSON lines. A line
+// without a terminating '\n' that grows past this size is dropped to avoid
+// unbounded memory growth from a misbehaving producer.
+const maxSinkLineBytes = 1 << 20 // 1 MiB
+
 // NewPretty wraps w with an NDJSON pretty-printer.
 //
 // Each newline-delimited JSON record is reformatted into a single human-readable
@@ -39,6 +44,9 @@ func (p *prettyWriter) Write(b []byte) (int, error) {
 		data := p.buf.Bytes()
 		i := bytes.IndexByte(data, '\n')
 		if i < 0 {
+			if p.buf.Len() > maxSinkLineBytes {
+				p.buf.Reset()
+			}
 			break
 		}
 		line := append([]byte(nil), data[:i]...)
