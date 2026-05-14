@@ -191,14 +191,22 @@ logger  := xlog.New(slogadapter.New(handler))
 logger.Info("started", xlog.String("service", "api"))
 ```
 
-### Built-in contribs
+### Available contribs
 
-| Path                                       | Wraps          | Deps           |
-|--------------------------------------------|----------------|----------------|
-| `github.com/gopherex/xlog/contrib/slog`    | `log/slog`     | stdlib only    |
+| Path                                          | Wraps                                       |
+|-----------------------------------------------|---------------------------------------------|
+| `github.com/gopherex/xlog/contrib/slog`       | stdlib `log/slog`                           |
+| `github.com/gopherex/xlog/contrib/zap`        | `go.uber.org/zap`                           |
+| `github.com/gopherex/xlog/contrib/zerolog`    | `github.com/rs/zerolog`                     |
+| `github.com/gopherex/xlog/contrib/logrus`     | `github.com/sirupsen/logrus`                |
+| `github.com/gopherex/xlog/contrib/hclog`      | `github.com/hashicorp/go-hclog`             |
+| `github.com/gopherex/xlog/contrib/gokit`      | `github.com/go-kit/log`                     |
+| `github.com/gopherex/xlog/contrib/apex`       | `github.com/apex/log`                       |
+| `github.com/gopherex/xlog/contrib/phuslu`     | `github.com/phuslu/log`                     |
+| `github.com/gopherex/xlog/contrib/charm`      | `github.com/charmbracelet/log`              |
+| `github.com/gopherex/xlog/contrib/log15`      | `gopkg.in/inconshreveable/log15.v2`         |
 
-zap, zerolog, logrus etc. follow the same pattern — add them under
-`contrib/<name>/` with their own `go.mod`.
+Each contrib is its own module — `go get` pulls only what you use.
 
 ### Writing your own adapter
 
