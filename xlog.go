@@ -367,7 +367,21 @@ type Config struct {
 	AsyncBuffer      int
 	AsyncPolicy      AsyncPolicy
 	UseAsync         bool
+	Pretty           PrettyMode
 }
+
+// PrettyMode controls human-readable output for JSON loggers.
+type PrettyMode int
+
+const (
+	// PrettyAuto enables pretty output when XLOG_PRETTY env is truthy or, if
+	// the env is unset, when the writer is a TTY. This is the default.
+	PrettyAuto PrettyMode = iota
+	// PrettyOn forces pretty output regardless of env or TTY.
+	PrettyOn
+	// PrettyOff forces raw JSON output regardless of env or TTY.
+	PrettyOff
+)
 
 type Option func(*Config)
 
@@ -417,6 +431,9 @@ func WithStacktrace(level Level) Option { return func(c *Config) { c.Stacktrace 
 func WithSampling(first, thereafter uint64) Option {
 	return func(c *Config) { c.SampleFirst = first; c.SampleThereafter = thereafter }
 }
+func WithPretty() Option    { return func(c *Config) { c.Pretty = PrettyOn } }
+func WithoutPretty() Option { return func(c *Config) { c.Pretty = PrettyOff } }
+
 func WithAsync(buffer int, policy AsyncPolicy) Option {
 	return func(c *Config) {
 		c.UseAsync = true
@@ -434,6 +451,10 @@ func buildCore(format string, cfg Config) Core {
 	baseLevel := cfg.Level
 	if useDynamicLevel {
 		baseLevel = DebugLevel
+	}
+
+	if format == "json" && resolvePretty(cfg.Pretty, cfg.Writer) {
+		format = "console"
 	}
 
 	var c Core
@@ -466,6 +487,36 @@ func buildCore(format string, cfg Config) Core {
 		c = jsoncore.New(cfg.Writer, opts...)
 	}
 	return wrapCore(c, cfg)
+}
+
+// resolvePretty decides whether to switch the JSON backend to console output.
+// Order: explicit option > XLOG_PRETTY env > TTY auto-detect.
+func resolvePretty(mode PrettyMode, w io.Writer) bool {
+	switch mode {
+	case PrettyOn:
+		return true
+	case PrettyOff:
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("XLOG_PRETTY"))) {
+	case "1", "true", "yes", "on", "y", "t":
+		return true
+	case "0", "false", "no", "off", "n", "f":
+		return false
+	}
+	return isTerminalWriter(w)
+}
+
+func isTerminalWriter(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	st, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (st.Mode() & os.ModeCharDevice) != 0
 }
 
 func wrapCore(c Core, cfg Config) Core {

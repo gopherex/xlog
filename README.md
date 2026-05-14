@@ -124,6 +124,44 @@ handler := xloghttp.Middleware(logger)(mux)
 Propagates `X-Request-Id`, stores logger in request context, logs method, path,
 status, duration, bytes, user agent, remote IP.
 
+## Pretty output
+
+Two paths to human-readable logs without a separate binary (zap-pretty style):
+
+**1. `WithPretty()` — auto-switching encoder.**
+For the root logger. JSON in prod, console in dev — same code:
+
+```go
+logger := xlog.NewJSON(xlog.WithPretty()) // forces console layout
+```
+
+`PrettyAuto` (default) honors `XLOG_PRETTY` env first, then falls back to TTY
+detection on the writer:
+
+| `XLOG_PRETTY`            | Result                       |
+|--------------------------|------------------------------|
+| `1` / `true` / `yes` / `on` | pretty                    |
+| `0` / `false` / `no` / `off` | raw JSON                 |
+| unset                    | pretty if stdout is a TTY    |
+
+Explicit `xlog.WithPretty()` / `xlog.WithoutPretty()` override the env.
+
+**2. `sink.NewPretty(w)` — NDJSON reformatter.**
+Wraps any `io.Writer`. Parses each JSON line, prints a colored single-line
+record, falls back to passthrough for non-JSON. Backend-agnostic — works with
+`jsoncore`, the zap/zerolog/slog contribs, or any external JSON logger:
+
+```go
+out := sink.NewPretty(os.Stdout)
+
+// our facade
+logger := xlog.NewJSON(xlog.WithWriter(out))
+
+// or any contrib that writes NDJSON
+zl := zerolog.New(out)
+xlog.New(zerologadapter.New(zl)).Info("hi")
+```
+
 ## Helper fields
 
 ```go
@@ -298,3 +336,4 @@ use (
 - `xlog.WithStacktrace(level)`
 - `xlog.WithSampling(first, thereafter)`
 - `xlog.WithAsync(buffer, policy)`
+- `xlog.WithPretty()` / `xlog.WithoutPretty()` (see Pretty output; respects `XLOG_PRETTY` env)

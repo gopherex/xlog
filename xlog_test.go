@@ -340,3 +340,128 @@ func BenchmarkFieldSize(b *testing.B) {
 	size := unsafe.Sizeof(xlog.Field{})
 	b.ReportMetric(float64(size), "bytes/field")
 }
+
+func TestWithPrettySwitchesToConsole(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithPretty())
+	logger.Info("started", xlog.String("service", "api"))
+
+	line := out.String()
+	if strings.HasPrefix(line, "{") {
+		t.Fatalf("expected pretty/console, got JSON: %q", line)
+	}
+	if !strings.Contains(line, "INFO") || !strings.Contains(line, `service="api"`) {
+		t.Fatalf("line = %q", line)
+	}
+}
+
+func TestPrettyEnvForcesOn(t *testing.T) {
+	t.Setenv("XLOG_PRETTY", "1")
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out))
+	logger.Info("started")
+	if strings.HasPrefix(out.String(), "{") {
+		t.Fatalf("env should force pretty: %q", out.String())
+	}
+}
+
+func TestPrettyEnvForcesOff(t *testing.T) {
+	t.Setenv("XLOG_PRETTY", "0")
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithPretty())
+	logger.Info("started")
+	// WithPretty wins over env (explicit option > env)
+	if strings.HasPrefix(out.String(), "{") {
+		t.Fatalf("explicit option should win: %q", out.String())
+	}
+}
+
+func TestPrettyDefaultsToJSONForNonTTY(t *testing.T) {
+	t.Setenv("XLOG_PRETTY", "")
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out))
+	logger.Info("started")
+	if !strings.HasPrefix(out.String(), "{") {
+		t.Fatalf("expected raw JSON for non-TTY buffer: %q", out.String())
+	}
+}
+
+func TestSinkPrettyWithJSONLogger(t *testing.T) {
+	var raw bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(sink.NewPretty(&raw)))
+	logger.Info("started", xlog.String("service", "api"))
+
+	if strings.HasPrefix(raw.String(), "{") {
+		t.Fatalf("expected reformatted output: %q", raw.String())
+	}
+	if !strings.Contains(raw.String(), "started") {
+		t.Fatalf("missing msg: %q", raw.String())
+	}
+}
+
+func TestWithLevelEnabler(t *testing.T) {
+	var out bytes.Buffer
+	gate := xlog.NewAtomicLevel(xlog.WarnLevel)
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithLevelEnabler(gate),
+	)
+	logger.Info("ignored")
+	gate.Set(xlog.InfoLevel)
+	logger.Info("kept")
+	if strings.Count(out.String(), "\n") != 1 {
+		t.Fatalf("out = %q", out.String())
+	}
+}
+
+type tagEncoder struct{}
+
+func (tagEncoder) Encode(dst []byte, _ xlog.Event) []byte {
+	return append(dst, []byte(`{"tagged":true}`)...)
+}
+
+func TestWithEncoder(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithEncoder(tagEncoder{}),
+	)
+	logger.Info("ignored-msg")
+	if !strings.Contains(out.String(), `{"tagged":true}`) {
+		t.Fatalf("out = %q", out.String())
+	}
+}
+
+func TestWithCallerSkip(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithCallerSkip(0),
+	)
+	logger.Info("with-caller")
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	caller, ok := got["caller"].(string)
+	if !ok || caller == "" {
+		t.Fatalf("caller missing: %#v", got["caller"])
+	}
+	if !strings.Contains(caller, ":") {
+		t.Fatalf("caller format: %q", caller)
+	}
+}
+
+func TestWithoutPrettyOverridesEnv(t *testing.T) {
+	t.Setenv("XLOG_PRETTY", "1")
+	var out bytes.Buffer
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithoutPretty(),
+	)
+	logger.Info("started")
+	if !strings.HasPrefix(out.String(), "{") {
+		t.Fatalf("WithoutPretty should force raw JSON: %q", out.String())
+	}
+}
