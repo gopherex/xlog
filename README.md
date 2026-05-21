@@ -14,7 +14,8 @@ pkg/sink/            io.Writer targets (file, multi, locked, std…)
 pkg/http/            net/http middleware (package http, alias as xloghttp)
 internal/consolecore dev-oriented human-readable backend
 internal/jsoncore    JSON backend (github.com/go-faster/jx)
-contrib/<name>/      opt-in adapters with their own go.mod
+contrib/loggers/<name>/  opt-in logging-library adapters, each its own go.mod
+contrib/libs/<name>/     opt-in non-logger library integrations (e.g. pgx)
 ```
 
 ## Install
@@ -200,16 +201,21 @@ Fully manual encoding: `xlog.CustomFn`.
 
 ## Contrib adapters
 
-Adapters that wrap external loggers (slog, zap, zerolog, …) live under
-`contrib/<name>/` as **separate Go modules**. This keeps the root module free of
-third-party dependencies — you pull in only the adapters you actually use.
+Adapters live under `contrib/` as **separate Go modules**, so the root module
+stays free of third-party dependencies — you pull in only what you use. They
+are grouped by kind:
+
+- `contrib/loggers/<name>/` — adapters for other **logging** libraries (slog,
+  zap, zerolog, …), wired in both directions.
+- `contrib/libs/<name>/` — integrations for **non-logger** libraries that emit
+  their own logs (e.g. `pgx`), routed into xlog.
 
 ### Installing an adapter
 
 Each adapter has its own import path and `go get`:
 
 ```sh
-go get github.com/gopherex/xlog/contrib/slog
+go get github.com/gopherex/xlog/contrib/loggers/slog
 ```
 
 Use it like any other Core:
@@ -220,7 +226,7 @@ import (
     "os"
 
     "github.com/gopherex/xlog"
-    slogadapter "github.com/gopherex/xlog/contrib/slog"
+    slogadapter "github.com/gopherex/xlog/contrib/loggers/slog"
 )
 
 handler := slog.NewJSONHandler(os.Stdout, nil)
@@ -235,18 +241,24 @@ Each contrib is its own Go module — `go get` pulls only what you use. Both
 directions are supported: use xlog through a native backend (`New`), or expose
 xlog where the native logger's API is expected (`NewSink…`).
 
-| Path                                       | Forward (xlog uses native)       | Reverse (native uses xlog)         |
-|--------------------------------------------|----------------------------------|------------------------------------|
-| `…/contrib/slog`     (`log/slog`)          | `slog.New(handler)`              | `slog.NewSink(l) slog.Handler`     |
-| `…/contrib/zap`      (`go.uber.org/zap`)   | `zap.New(zl)`                    | `zap.NewSink(l) zapcore.Core`      |
-| `…/contrib/zerolog`  (`rs/zerolog`)        | `zerolog.New(zl)`                | `zerolog.NewSinkWriter(l) io.Writer` |
-| `…/contrib/logrus`   (`sirupsen/logrus`)   | `logrus.New(lr)`                 | `logrus.NewSinkHook(l) logrus.Hook` |
-| `…/contrib/hclog`    (`hashicorp/go-hclog`) | `hclog.New(hc)`                 | `hclog.NewSinkWriter(l) io.Writer` |
-| `…/contrib/gokit`    (`go-kit/log`)        | `gokit.New(kl)`                  | `gokit.NewSink(l) kitlog.Logger`   |
-| `…/contrib/apex`     (`apex/log`)          | `apex.New(al)`                   | `apex.NewSinkHandler(l) apexlog.Handler` |
-| `…/contrib/phuslu`   (`phuslu/log`)        | `phuslu.New(pl)`                 | `phuslu.NewSinkWriter(l) io.Writer` |
-| `…/contrib/charm`    (`charmbracelet/log`) | `charm.New(cl)`                  | `charm.NewSinkWriter(l) io.Writer` |
-| `…/contrib/log15`    (`inconshreveable/log15.v2`) | `log15.New(l15)`          | `log15.NewSinkHandler(l) l15.Handler` |
+| Path                                               | Forward (xlog uses native)  | Reverse (native uses xlog)         |
+|----------------------------------------------------|-----------------------------|------------------------------------|
+| `…/contrib/loggers/slog`     (`log/slog`)          | `slog.New(handler)`         | `slog.NewSink(l) slog.Handler`     |
+| `…/contrib/loggers/zap`      (`go.uber.org/zap`)   | `zap.New(zl)`               | `zap.NewSink(l) zapcore.Core`      |
+| `…/contrib/loggers/zerolog`  (`rs/zerolog`)        | `zerolog.New(zl)`           | `zerolog.NewSinkWriter(l) io.Writer` |
+| `…/contrib/loggers/logrus`   (`sirupsen/logrus`)   | `logrus.New(lr)`            | `logrus.NewSinkHook(l) logrus.Hook` |
+| `…/contrib/loggers/hclog`    (`hashicorp/go-hclog`) | `hclog.New(hc)`            | `hclog.NewSinkWriter(l) io.Writer` |
+| `…/contrib/loggers/gokit`    (`go-kit/log`)        | `gokit.New(kl)`             | `gokit.NewSink(l) kitlog.Logger`   |
+| `…/contrib/loggers/apex`     (`apex/log`)          | `apex.New(al)`              | `apex.NewSinkHandler(l) apexlog.Handler` |
+| `…/contrib/loggers/phuslu`   (`phuslu/log`)        | `phuslu.New(pl)`            | `phuslu.NewSinkWriter(l) io.Writer` |
+| `…/contrib/loggers/charm`    (`charmbracelet/log`) | `charm.New(cl)`             | `charm.NewSinkWriter(l) io.Writer` |
+| `…/contrib/loggers/log15`    (`inconshreveable/log15.v2`) | `log15.New(l15)`     | `log15.NewSinkHandler(l) l15.Handler` |
+
+Non-logger library integrations live under `contrib/libs/`:
+
+| Path                          | Integration                                        |
+|-------------------------------|----------------------------------------------------|
+| `…/contrib/libs/pgx` (`jackc/pgx/v5`) | `pgx.NewTracer(l) (*tracelog.TraceLog, error)` — routes pgx query logs into xlog (ctx-aware). |
 
 Forward example — xlog facade, zap backend:
 
@@ -272,12 +284,13 @@ configured for JSON; the writer reparses each line into an xlog event.
 
 An adapter is a type implementing `core.Core`. Steps:
 
-1. Create a directory `contrib/<name>/`.
+1. Create a directory `contrib/loggers/<name>/` (logging libraries) or
+   `contrib/libs/<name>/` (other libraries).
 2. Add a `go.mod`:
 
    ```sh
-   cd contrib/<name>
-   go mod init github.com/gopherex/xlog/contrib/<name>
+   cd contrib/loggers/<name>
+   go mod init github.com/gopherex/xlog/contrib/loggers/<name>
    go get github.com/gopherex/xlog
    ```
 
@@ -322,7 +335,7 @@ An adapter is a type implementing `core.Core`. Steps:
    (`StringKind`, `BoolKind`, `Int64Kind`, `Uint64Kind`, `Float64Kind`,
    `DurationKind`, `TimeKind`, `ErrorKind`, `AnyKind`, `CustomKind`) and call
    the matching accessor (`StringValue()`, `Int64Value()`, …). See
-   `contrib/slog/slog.go` for a complete example.
+   `contrib/loggers/slog/slog.go` for a complete example.
 
 5. Add tests writing through `xlog.New(yourcore.New(...))` and asserting on
    the external sink's output.
@@ -341,8 +354,9 @@ When adding a new contrib, append it to `go.work`:
 ```text
 use (
     .
-    ./contrib/slog
-    ./contrib/<new>
+    ./contrib/loggers/slog
+    ./contrib/loggers/<new>
+    ./contrib/libs/<new>
 )
 ```
 

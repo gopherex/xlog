@@ -143,6 +143,45 @@ func TestContextHelpers(t *testing.T) {
 	}
 }
 
+func TestContextLoggerMergesContextFields(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithLevel(xlog.TraceLevel))
+	ctx := xlog.ContextWithFields(context.Background(), xlog.String("request_id", "r1"))
+
+	cl := logger.Ctx()
+	cl.Info(ctx, "handled", xlog.Int("n", 1))
+
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["request_id"] != "r1" || got["n"] != float64(1) || got[xlog.FieldLevel] != "info" {
+		t.Fatalf("log = %#v", got)
+	}
+}
+
+func TestContextLoggerAllLevels(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithLevel(xlog.TraceLevel))
+	cl := logger.Ctx()
+	ctx := context.Background()
+	cl.Trace(ctx, "t")
+	cl.Debug(ctx, "d")
+	cl.Info(ctx, "i")
+	cl.Warn(ctx, "w")
+	cl.Error(ctx, "e")
+	cl.Critical(ctx, "c")
+	cl.Log(ctx, xlog.InfoLevel, "l")
+	if n := strings.Count(out.String(), "\n"); n != 7 {
+		t.Fatalf("lines = %d, out = %q", n, out.String())
+	}
+}
+
+func TestContextLoggerNilContextSafe(t *testing.T) {
+	logger := xlog.NewJSON(xlog.WithWriter(io.Discard))
+	logger.Ctx().Info(nil, "no panic") //nolint:staticcheck // exercising nil-ctx guard
+}
+
 func TestSamplingOption(t *testing.T) {
 	var out bytes.Buffer
 	logger := xlog.NewJSON(
@@ -590,5 +629,76 @@ func TestLogDoesNotMutateCallerSlice(t *testing.T) {
 
 	if len(src) != 1 {
 		t.Fatalf("caller slice mutated: len=%d", len(src))
+	}
+}
+
+func TestTraceCriticalLevelStrings(t *testing.T) {
+	if xlog.TraceLevel.String() != "trace" {
+		t.Fatalf("trace string = %q", xlog.TraceLevel.String())
+	}
+	if xlog.CriticalLevel.String() != "critical" {
+		t.Fatalf("critical string = %q", xlog.CriticalLevel.String())
+	}
+	if !(xlog.TraceLevel < xlog.DebugLevel && xlog.ErrorLevel < xlog.CriticalLevel) {
+		t.Fatalf("ordering broken: trace=%d debug=%d error=%d critical=%d",
+			xlog.TraceLevel, xlog.DebugLevel, xlog.ErrorLevel, xlog.CriticalLevel)
+	}
+}
+
+func TestParseLevelTraceCritical(t *testing.T) {
+	for in, want := range map[string]xlog.Level{
+		"trace":    xlog.TraceLevel,
+		"TRACE":    xlog.TraceLevel,
+		"critical": xlog.CriticalLevel,
+		"crit":     xlog.CriticalLevel,
+	} {
+		got, err := xlog.ParseLevel(in)
+		if err != nil || got != want {
+			t.Fatalf("ParseLevel(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+}
+
+func TestTraceCriticalMethods(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithLevel(xlog.TraceLevel))
+	logger.Trace("t")
+	logger.Critical("c")
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, out = %q", len(lines), out.String())
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if first[xlog.FieldLevel] != "trace" {
+		t.Fatalf("first level = %v", first[xlog.FieldLevel])
+	}
+}
+
+func TestLoggerLevelDefault(t *testing.T) {
+	logger := xlog.NewJSON(xlog.WithWriter(io.Discard))
+	if got := logger.Level(); got != xlog.InfoLevel {
+		t.Fatalf("Level() = %v, want info", got)
+	}
+}
+
+func TestLoggerLevelStatic(t *testing.T) {
+	logger := xlog.NewJSON(xlog.WithWriter(io.Discard), xlog.WithLevel(xlog.WarnLevel))
+	if got := logger.Level(); got != xlog.WarnLevel {
+		t.Fatalf("Level() = %v, want warn", got)
+	}
+}
+
+func TestLoggerLevelAtomicReflectsSet(t *testing.T) {
+	level := xlog.NewAtomicLevel(xlog.WarnLevel)
+	logger := xlog.NewJSON(xlog.WithWriter(io.Discard), xlog.WithAtomicLevel(level))
+	if got := logger.Level(); got != xlog.WarnLevel {
+		t.Fatalf("Level() = %v, want warn", got)
+	}
+	level.Set(xlog.DebugLevel)
+	if got := logger.Level(); got != xlog.DebugLevel {
+		t.Fatalf("Level() after Set = %v, want debug", got)
 	}
 }

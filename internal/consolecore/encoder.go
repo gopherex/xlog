@@ -133,6 +133,8 @@ func appendAny(dst []byte, value any) []byte {
 
 func levelLabel(level core.Level) []byte {
 	switch level {
+	case core.TraceLevel:
+		return []byte("TRACE")
 	case core.DebugLevel:
 		return []byte("DEBUG")
 	case core.InfoLevel:
@@ -141,6 +143,8 @@ func levelLabel(level core.Level) []byte {
 		return []byte("WARN ")
 	case core.ErrorLevel:
 		return []byte("ERROR")
+	case core.CriticalLevel:
+		return []byte("CRIT ")
 	default:
 		return []byte("UNKWN")
 	}

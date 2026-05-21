@@ -7,6 +7,14 @@ type LevelEnabler interface {
 	Enabled(Level) bool
 }
 
+// LevelReader is an optional LevelEnabler that reports its current minimum
+// level. *AtomicLevel implements it; Logger.Level uses it to read dynamic
+// levelers without probing.
+type LevelReader interface {
+	LevelEnabler
+	Level() Level
+}
+
 // AtomicLevel is a dynamically adjustable minimum log level.
 type AtomicLevel struct {
 	level atomic.Int32

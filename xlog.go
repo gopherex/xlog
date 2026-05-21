@@ -32,6 +32,7 @@ type (
 	Encoder      = xcore.Encoder
 	NopCore      = xcore.NopCore
 	LevelEnabler = xcore.LevelEnabler
+	LevelReader  = xcore.LevelReader
 	AtomicLevel  = xcore.AtomicLevel
 	Observer     = xcore.Observer
 	AsyncPolicy  = xcore.AsyncPolicy
@@ -41,10 +42,12 @@ type (
 )
 
 const (
-	DebugLevel = xcore.DebugLevel
-	InfoLevel  = xcore.InfoLevel
-	WarnLevel  = xcore.WarnLevel
-	ErrorLevel = xcore.ErrorLevel
+	TraceLevel    = xcore.TraceLevel
+	DebugLevel    = xcore.DebugLevel
+	InfoLevel     = xcore.InfoLevel
+	WarnLevel     = xcore.WarnLevel
+	ErrorLevel    = xcore.ErrorLevel
+	CriticalLevel = xcore.CriticalLevel
 
 	AsyncBlock      = xcore.AsyncBlock
 	AsyncDropNewest = xcore.AsyncDropNewest
@@ -74,9 +77,12 @@ var (
 	CustomFn = xfield.CustomFunc
 )
 
-// ParseLevel parses "debug" | "info" | "warn" | "warning" | "error" | "err" (case-insensitive).
+// ParseLevel parses "trace" | "debug" | "info" | "warn" | "warning" | "error" |
+// "err" | "critical" | "crit" | "fatal" (case-insensitive).
 func ParseLevel(s string) (Level, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "trace":
+		return TraceLevel, nil
 	case "debug":
 		return DebugLevel, nil
 	case "info":
@@ -85,6 +91,8 @@ func ParseLevel(s string) (Level, error) {
 		return WarnLevel, nil
 	case "error", "err":
 		return ErrorLevel, nil
+	case "critical", "crit", "fatal":
+		return CriticalLevel, nil
 	}
 	return InfoLevel, errors.New("xlog: unknown level " + strconv.Quote(s))
 }
@@ -114,6 +122,8 @@ func Generic[T any](key string, value T, append xfield.AppendFunc[T]) Field {
 type Logger struct {
 	name            string
 	core            Core
+	level           Level        // configured min level (static path)
+	leveler         LevelEnabler // dynamic gate, nil on the static path
 	caller          bool
 	callerSkip      int
 	stacktrace      bool
@@ -145,6 +155,16 @@ func (l *Logger) Core() Core {
 }
 
 func (l *Logger) Enabled(level Level) bool { return l.Core().Enabled(level) }
+
+// Level reports the current minimum level. A dynamic leveler that implements
+// LevelReader (e.g. *AtomicLevel) is read live, so it reflects Set; otherwise
+// the configured static level is returned.
+func (l *Logger) Level() Level {
+	if lr, ok := l.leveler.(LevelReader); ok {
+		return lr.Level()
+	}
+	return l.level
+}
 
 func (l *Logger) With(fields ...Field) *Logger {
 	if len(fields) == 0 {
@@ -201,10 +221,12 @@ func (l *Logger) ReplaceName(name string) *Logger {
 
 func (l *Logger) Sync() error { return l.Core().Sync() }
 
-func (l *Logger) Debug(msg string, fields ...Field) { l.log(DebugLevel, msg, fields) }
-func (l *Logger) Info(msg string, fields ...Field)  { l.log(InfoLevel, msg, fields) }
-func (l *Logger) Warn(msg string, fields ...Field)  { l.log(WarnLevel, msg, fields) }
-func (l *Logger) Error(msg string, fields ...Field) { l.log(ErrorLevel, msg, fields) }
+func (l *Logger) Trace(msg string, fields ...Field)    { l.log(TraceLevel, msg, fields) }
+func (l *Logger) Debug(msg string, fields ...Field)    { l.log(DebugLevel, msg, fields) }
+func (l *Logger) Info(msg string, fields ...Field)     { l.log(InfoLevel, msg, fields) }
+func (l *Logger) Warn(msg string, fields ...Field)     { l.log(WarnLevel, msg, fields) }
+func (l *Logger) Error(msg string, fields ...Field)    { l.log(ErrorLevel, msg, fields) }
+func (l *Logger) Critical(msg string, fields ...Field) { l.log(CriticalLevel, msg, fields) }
 
 // Log writes at the given level. Primary entry point for adapters that map an
 // external level enum onto xlog at runtime.
@@ -217,6 +239,24 @@ func (l *Logger) log(level Level, msg string, fields []Field) {
 	}
 	fields = l.attachExtras(level, fields)
 	_ = c.Write(Event{Level: level, Message: msg, Fields: fields})
+}
+
+// logContext is the context-aware variant: it attaches fields carried in ctx
+// (ContextWithFields) and passes ctx through on the Event for context-aware
+// backends. ctx must be non-nil.
+func (l *Logger) logContext(ctx context.Context, level Level, msg string, fields []Field) {
+	c := l.Core()
+	if !c.Enabled(level) {
+		return
+	}
+	fields = l.attachExtras(level, fields)
+	_ = c.Write(Event{
+		Ctx:     ctx,
+		Level:   level,
+		Message: msg,
+		Context: FieldsFromContext(ctx),
+		Fields:  fields,
+	})
 }
 
 // attachExtras returns fields plus any logger-level enrichment (name, caller,
@@ -336,10 +376,70 @@ func (e *CheckedEntry) Write(fields ...Field) {
 	_ = e.core.Write(Event{Level: e.level, Message: e.message, Fields: fields})
 }
 
-func (l *Logger) CheckDebug(msg string) *CheckedEntry { return l.Check(DebugLevel, msg) }
-func (l *Logger) CheckInfo(msg string) *CheckedEntry  { return l.Check(InfoLevel, msg) }
-func (l *Logger) CheckWarn(msg string) *CheckedEntry  { return l.Check(WarnLevel, msg) }
-func (l *Logger) CheckError(msg string) *CheckedEntry { return l.Check(ErrorLevel, msg) }
+func (l *Logger) CheckTrace(msg string) *CheckedEntry    { return l.Check(TraceLevel, msg) }
+func (l *Logger) CheckDebug(msg string) *CheckedEntry    { return l.Check(DebugLevel, msg) }
+func (l *Logger) CheckInfo(msg string) *CheckedEntry     { return l.Check(InfoLevel, msg) }
+func (l *Logger) CheckWarn(msg string) *CheckedEntry     { return l.Check(WarnLevel, msg) }
+func (l *Logger) CheckError(msg string) *CheckedEntry    { return l.Check(ErrorLevel, msg) }
+func (l *Logger) CheckCritical(msg string) *CheckedEntry { return l.Check(CriticalLevel, msg) }
+
+// ---- ContextLogger -----------------------------------------------------
+
+// ContextLogger mirrors Logger but takes a context.Context as the first
+// argument on every logging method. Each call attaches fields carried in the
+// context (ContextWithFields) and passes the context through to the Event so
+// context-aware backends (e.g. the slog adapter) and OTel-style integrations
+// can read request-scoped values. The underlying Logger is bound once.
+type ContextLogger struct {
+	l *Logger
+}
+
+// Ctx returns a ContextLogger bound to l.
+func (l *Logger) Ctx() *ContextLogger { return &ContextLogger{l: l} }
+
+// Logger returns the underlying Logger.
+func (c *ContextLogger) Logger() *Logger { return c.l }
+
+func (c *ContextLogger) Trace(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, TraceLevel, msg, fields)
+}
+func (c *ContextLogger) Debug(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, DebugLevel, msg, fields)
+}
+func (c *ContextLogger) Info(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, InfoLevel, msg, fields)
+}
+func (c *ContextLogger) Warn(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, WarnLevel, msg, fields)
+}
+func (c *ContextLogger) Error(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, ErrorLevel, msg, fields)
+}
+func (c *ContextLogger) Critical(ctx context.Context, msg string, fields ...Field) {
+	c.log(ctx, CriticalLevel, msg, fields)
+}
+
+// Log writes at the given level. Entry point for adapters mapping an external
+// level enum onto xlog at runtime.
+func (c *ContextLogger) Log(ctx context.Context, level Level, msg string, fields ...Field) {
+	c.log(ctx, level, msg, fields)
+}
+
+func (c *ContextLogger) Enabled(level Level) bool { return c.l.Enabled(level) }
+func (c *ContextLogger) Level() Level             { return c.l.Level() }
+func (c *ContextLogger) Sync() error              { return c.l.Sync() }
+
+// With returns a ContextLogger whose underlying Logger carries the extra fields.
+func (c *ContextLogger) With(fields ...Field) *ContextLogger {
+	return &ContextLogger{l: c.l.With(fields...)}
+}
+
+func (c *ContextLogger) log(ctx context.Context, level Level, msg string, fields []Field) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.l.logContext(ctx, level, msg, fields)
+}
 
 // ---- Context helpers ---------------------------------------------------
 
@@ -513,6 +613,8 @@ func newLogger(format string, opts ...Option) *Logger {
 	}
 	c := buildCore(format, cfg)
 	logger := New(c)
+	logger.level = cfg.Level
+	logger.leveler = cfg.Leveler
 	logger.caller = cfg.Caller
 	logger.callerSkip = cfg.CallerSkip
 	if cfg.Stacktrace != nil {
