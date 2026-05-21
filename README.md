@@ -1,5 +1,7 @@
 # xlog
 
+[![CI](https://github.com/gopherex/xlog/actions/workflows/ci.yml/badge.svg)](https://github.com/gopherex/xlog/actions/workflows/ci.yml)
+
 Structured logger facade for Go with a zap-like field API and a pluggable
 backend contract.
 
