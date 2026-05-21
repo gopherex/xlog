@@ -3,7 +3,7 @@ module github.com/gopherex/xlog/contrib/loggers/zerolog
 go 1.25.0
 
 require (
-	github.com/gopherex/xlog v0.0.0
+	github.com/gopherex/xlog v1.0.0
 	github.com/rs/zerolog v1.33.0
 )
 

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/charmbracelet/log v0.4.0
-	github.com/gopherex/xlog v0.0.0
+	github.com/gopherex/xlog v1.0.0
 )
 
 require (
