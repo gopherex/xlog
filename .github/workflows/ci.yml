@@ -62,27 +62,3 @@ jobs:
       - name: go test -race
         working-directory: ${{ matrix.module }}
         run: go test -race ./...
-
-  # Advisory only: golangci-lint is sensitive to the Go toolchain it was built
-  # with, so a mismatch must not break CI. Surfaces findings without blocking.
-  lint:
-    needs: discover
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    strategy:
-      fail-fast: false
-      matrix:
-        module: ${{ fromJSON(needs.discover.outputs.modules) }}
-    name: lint (${{ matrix.module }})
-    env:
-      GOWORK: "off"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-          cache-dependency-path: ${{ matrix.module }}/go.sum
-      - uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: ${{ matrix.module }}
