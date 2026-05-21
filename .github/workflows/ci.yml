@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_call: # reused by release.yml to gate releases on a green build
 
 permissions:
   contents: read

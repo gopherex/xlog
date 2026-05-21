@@ -182,6 +182,43 @@ func TestContextLoggerNilContextSafe(t *testing.T) {
 	logger.Ctx().Info(nil, "no panic") //nolint:staticcheck // exercising nil-ctx guard
 }
 
+type ctxExtractorKey struct{}
+
+func TestWithContextFieldExtractor(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithContextFieldExtractor(func(ctx context.Context) []xlog.Field {
+			if v, ok := ctx.Value(ctxExtractorKey{}).(string); ok {
+				return []xlog.Field{xlog.String("trace_id", v)}
+			}
+			return nil
+		}),
+	)
+
+	// ctx path: extractor runs.
+	ctx := context.WithValue(context.Background(), ctxExtractorKey{}, "abc")
+	logger.Ctx().Info(ctx, "with ctx")
+	var got map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got["trace_id"] != "abc" {
+		t.Fatalf("trace_id = %v, want abc", got["trace_id"])
+	}
+
+	// plain path: no ctx, extractor must not inject.
+	out.Reset()
+	logger.Info("no ctx")
+	var got2 map[string]any
+	if err := json.Unmarshal(out.Bytes(), &got2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := got2["trace_id"]; ok {
+		t.Fatalf("plain log unexpectedly has trace_id: %#v", got2)
+	}
+}
+
 func TestSamplingOption(t *testing.T) {
 	var out bytes.Buffer
 	logger := xlog.NewJSON(

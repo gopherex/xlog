@@ -261,6 +261,31 @@ Non-logger library integrations live under `contrib/libs/`:
 | Path                          | Integration                                        |
 |-------------------------------|----------------------------------------------------|
 | `…/contrib/libs/pgx` (`jackc/pgx/v5`) | `pgx.NewTracer(l) (*tracelog.TraceLog, error)` — routes pgx query logs into xlog (ctx-aware). |
+| `…/contrib/libs/aws` (`aws-sdk-go-v2` / `smithy-go`) | `aws.New(l) logging.Logger` — routes AWS SDK logs into xlog (ctx-aware). |
+| `…/contrib/libs/otel` (`go.opentelemetry.io/otel`) | `otel.TraceFields` (trace_id/span_id enrichment), `otel.New(otellog.Logger)` (OTLP logs bridge), `otel.SpanObserver()` (record errors on the active span). |
+
+### OpenTelemetry
+
+Three composable integrations:
+
+```go
+import (
+    "github.com/gopherex/xlog"
+    otel "github.com/gopherex/xlog/contrib/libs/otel"
+)
+
+// A) Correlate every ctx log with the active trace.
+log := xlog.NewJSON(
+    xlog.WithContextFieldExtractor(otel.TraceFields), // adds trace_id/span_id
+    xlog.WithObserver(otel.SpanObserver()),           // C) error logs -> span event + status
+)
+log.Ctx().Info(ctx, "handled")   // {... "trace_id":"…","span_id":"…"}
+
+// B) Emit logs as an OTLP signal through the OTel Logs SDK.
+xl := xlog.New(otel.New(loggerProvider.Logger("xlog")))
+```
+
+`WithContextFieldExtractor` is OTel-agnostic — it takes any `func(context.Context) []xlog.Field`, so the root package keeps no OTel dependency.
 
 Forward example — xlog facade, zap backend:
 

@@ -124,6 +124,7 @@ type Logger struct {
 	core            Core
 	level           Level        // configured min level (static path)
 	leveler         LevelEnabler // dynamic gate, nil on the static path
+	ctxExtractor    func(context.Context) []Field
 	caller          bool
 	callerSkip      int
 	stacktrace      bool
@@ -249,12 +250,16 @@ func (l *Logger) logContext(ctx context.Context, level Level, msg string, fields
 	if !c.Enabled(level) {
 		return
 	}
+	ctxFields := FieldsFromContext(ctx)
+	if l.ctxExtractor != nil {
+		ctxFields = append(ctxFields, l.ctxExtractor(ctx)...)
+	}
 	fields = l.attachExtras(level, fields)
 	_ = c.Write(Event{
 		Ctx:     ctx,
 		Level:   level,
 		Message: msg,
-		Context: FieldsFromContext(ctx),
+		Context: ctxFields,
 		Fields:  fields,
 	})
 }
@@ -567,6 +572,7 @@ type Config struct {
 	Encoder          Encoder
 	Core             Core
 	Observer         Observer
+	ContextFields    func(context.Context) []Field
 	Caller           bool
 	CallerSkip       int
 	Stacktrace       *Level
@@ -615,6 +621,7 @@ func newLogger(format string, opts ...Option) *Logger {
 	logger := New(c)
 	logger.level = cfg.Level
 	logger.leveler = cfg.Leveler
+	logger.ctxExtractor = cfg.ContextFields
 	logger.caller = cfg.Caller
 	logger.callerSkip = cfg.CallerSkip
 	if cfg.Stacktrace != nil {
@@ -637,7 +644,17 @@ func WithTimeLayout(layout string) Option     { return func(c *Config) { c.TimeL
 func WithEncoder(encoder Encoder) Option      { return func(c *Config) { c.Encoder = encoder } }
 func WithCore(core Core) Option               { return func(c *Config) { c.Core = core } }
 func WithObserver(observer Observer) Option   { return func(c *Config) { c.Observer = observer } }
-func WithCaller(enabled bool) Option          { return func(c *Config) { c.Caller = enabled } }
+
+// WithContextFieldExtractor registers a function that derives extra fields from
+// the context on every ContextLogger call (Info(ctx, ...) etc.). Use it to
+// attach request-scoped data such as OTel trace_id/span_id to each log without
+// coupling the core to any specific library. The plain Logger path has no
+// context and is unaffected.
+func WithContextFieldExtractor(fn func(context.Context) []Field) Option {
+	return func(c *Config) { c.ContextFields = fn }
+}
+
+func WithCaller(enabled bool) Option { return func(c *Config) { c.Caller = enabled } }
 func WithCallerSkip(skip int) Option {
 	return func(c *Config) { c.Caller = true; c.CallerSkip = skip }
 }
