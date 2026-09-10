@@ -3,7 +3,7 @@ module github.com/gopherex/xlog/contrib/libs/otel
 go 1.25.0
 
 require (
-	github.com/gopherex/xlog v1.0.0
+	github.com/gopherex/xlog v1.0.1
 	go.opentelemetry.io/otel v1.45.0
 	go.opentelemetry.io/otel/log v0.21.0
 	go.opentelemetry.io/otel/sdk v1.45.0
