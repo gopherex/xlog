@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
 
 	"github.com/gopherex/xlog/pkg/core"
@@ -46,7 +47,7 @@ func (c *bridgeCore) Write(e core.Event) error {
 	rec.SetTimestamp(t)
 	rec.SetSeverity(toSeverity(e.Level))
 	rec.SetSeverityText(e.Level.String())
-	rec.SetBody(otellog.StringValue(e.Message))
+	rec.SetBody(attribute.StringValue(e.Message))
 	rec.AddAttributes(toLogKVs(c.context)...)
 	rec.AddAttributes(toLogKVs(e.Context)...)
 	rec.AddAttributes(toLogKVs(e.Fields)...)
@@ -90,38 +91,38 @@ func toSeverity(l core.Level) otellog.Severity {
 	return otellog.SeverityInfo
 }
 
-func toLogKVs(fields []field.Field) []otellog.KeyValue {
+func toLogKVs(fields []field.Field) []attribute.KeyValue {
 	if len(fields) == 0 {
 		return nil
 	}
-	out := make([]otellog.KeyValue, 0, len(fields))
+	out := make([]attribute.KeyValue, 0, len(fields))
 	for _, f := range fields {
 		out = append(out, toLogKV(f))
 	}
 	return out
 }
 
-func toLogKV(f field.Field) otellog.KeyValue {
+func toLogKV(f field.Field) attribute.KeyValue {
 	switch f.Kind {
 	case field.StringKind:
-		return otellog.String(f.Key, f.StringValue())
+		return attribute.String(f.Key, f.StringValue())
 	case field.BoolKind:
-		return otellog.Bool(f.Key, f.BoolValue())
+		return attribute.Bool(f.Key, f.BoolValue())
 	case field.Int64Kind:
-		return otellog.Int64(f.Key, f.Int64Value())
+		return attribute.Int64(f.Key, f.Int64Value())
 	case field.Uint64Kind:
-		return otellog.Int64(f.Key, int64(f.Uint64Value()))
+		return attribute.Int64(f.Key, int64(f.Uint64Value()))
 	case field.Float64Kind:
-		return otellog.Float64(f.Key, f.Float64Value())
+		return attribute.Float64(f.Key, f.Float64Value())
 	case field.DurationKind:
-		return otellog.String(f.Key, f.DurationValue().String())
+		return attribute.String(f.Key, f.DurationValue().String())
 	case field.TimeKind:
-		return otellog.String(f.Key, f.TimeValue().Format(time.RFC3339Nano))
+		return attribute.String(f.Key, f.TimeValue().Format(time.RFC3339Nano))
 	case field.ErrorKind:
 		if err := f.ErrorValue(); err != nil {
-			return otellog.String(f.Key, err.Error())
+			return attribute.String(f.Key, err.Error())
 		}
-		return otellog.String(f.Key, "")
+		return attribute.String(f.Key, "")
 	}
-	return otellog.String(f.Key, fmt.Sprint(f.AnyValue()))
+	return attribute.String(f.Key, fmt.Sprint(f.AnyValue()))
 }

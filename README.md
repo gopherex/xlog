@@ -266,6 +266,9 @@ Non-logger library integrations live under `contrib/libs/`:
 
 ### OpenTelemetry
 
+The adapter requires OpenTelemetry Logs API v0.21.0 or newer and OTel API/SDK
+v1.45.0 or newer. Log bodies and attributes use `go.opentelemetry.io/otel/attribute`.
+
 Three composable integrations:
 
 ```go

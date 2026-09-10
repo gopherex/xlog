@@ -98,7 +98,7 @@ release:
 	  echo
 	  echo "Release v$$new — will:"
 	  echo "  - set 'require $(ROOT_MODULE) v$$new' in every contrib go.mod"
-	  echo "  - commit 'release v$$new'"
+	  echo "  - commit 'chore(release): bump version to v$$new'"
 	  echo "  - create $${#TAGS[@]} tags and push"
 	  read -r -p "Type 'yes' to proceed: " ok
 	  [ "$$ok" = "yes" ] || { echo "Aborted."; exit 0; }
@@ -108,7 +108,7 @@ release:
 	    ( cd "$$d" && go mod edit -require=$(ROOT_MODULE)@v$$new )
 	  done
 	  git add -A
-	  git diff --cached --quiet || git commit -m "release v$$new"
+	  git diff --cached --quiet || git commit -m "chore(release): bump version to v$$new"
 	  for t in "$${TAGS[@]}"; do git tag -a "$$t" -m "$$t"; done
 	  git push origin HEAD
 	  git push origin "$${TAGS[@]}"
