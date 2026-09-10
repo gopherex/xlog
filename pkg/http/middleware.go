@@ -99,6 +99,11 @@ type responseRecorder struct {
 	bytes  int
 }
 
+// Unwrap lets http.ResponseController access the underlying writer's capabilities.
+func (r *responseRecorder) Unwrap() nethttp.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func (r *responseRecorder) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)

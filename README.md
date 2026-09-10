@@ -127,6 +127,12 @@ handler := xloghttp.Middleware(logger)(mux)
 Propagates `X-Request-Id`, stores logger in request context, logs method, path,
 status, duration, bytes, user agent, remote IP.
 
+The response writer exposes `Unwrap() http.ResponseWriter`, so
+`http.NewResponseController(w)` can reach underlying capabilities such as
+`Hijack` for WebSocket upgrades. Handlers must use `ResponseController` or unwrap
+the writer; a direct `w.(http.Hijacker)` assertion is not supported by the wrapper.
+Writes made directly to a hijacked connection are not included in response stats.
+
 ## Pretty output
 
 Two paths to human-readable logs without a separate binary (zap-pretty style):
