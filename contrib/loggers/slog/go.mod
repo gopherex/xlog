@@ -2,7 +2,7 @@ module github.com/gopherex/xlog/contrib/loggers/slog
 
 go 1.25.0
 
-require github.com/gopherex/xlog v1.0.1
+require github.com/gopherex/xlog v1.0.2
 
 require (
 	github.com/go-faster/errors v0.6.1 // indirect

@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/aws/smithy-go v1.22.5
-	github.com/gopherex/xlog v1.0.1
+	github.com/gopherex/xlog v1.0.2
 )
 
 require (

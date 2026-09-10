@@ -3,7 +3,7 @@ module github.com/gopherex/xlog/contrib/loggers/zap
 go 1.25.0
 
 require (
-	github.com/gopherex/xlog v1.0.1
+	github.com/gopherex/xlog v1.0.2
 	go.uber.org/zap v1.27.0
 )
 
