@@ -116,6 +116,44 @@ ctx = xlog.ContextWithFields(ctx, xlog.String("request_id", id))
 xlog.FromContext(ctx).Info("handled")
 ```
 
+## Routing log/slog into xlog
+
+Libraries that log through stdlib `log/slog` (`slog.Info`, `slog.Default()`)
+otherwise print Go's default text format into your xlog stream. Install an
+xlog-backed handler as the slog default to get them in the same format:
+
+```go
+logger := xlog.NewJSON(xlog.WithContextFieldExtractor(otel.TraceFields))
+slog.SetDefault(slog.New(xlog.NewSlogHandler(logger)))
+
+slog.InfoContext(ctx, "cache miss", "key", k, slog.Group("req", "id", id))
+// {"ts":"…","level":"info","msg":"cache miss","key":"…","req.id":"…","trace_id":"…"}
+```
+
+`NewSlogHandler` lives in the root package (stdlib only) and passes the
+`slog.Handler` conformance suite (`testing/slogtest`), except that a record
+with a zero time still gets `ts`.
+
+- **Levels** round down to the nearest named slog level: below `Debug` →
+  `trace`, `Debug` → `debug`, `Info` → `info`, `Warn` → `warn`, `Error` →
+  `error`, `Error+4` and above → `critical` (so `Info+2` is `info`).
+  `Enabled` follows the logger's level, including `WithAtomicLevel`.
+- **Attrs** keep their kind (string, int64, uint64, float64, bool, time,
+  duration — rendered per `WithDurationFormat`, `"1s"` by default); values
+  implementing `error` become error fields, the rest `Any`. `LogValuer`s are
+  resolved.
+- **Groups** become dotted keys (`req.id`), since xlog fields are flat; empty
+  groups are omitted, groups with an empty key are inlined, attrs with an empty
+  key are dropped. `WithAttrs` / `WithGroup` return independent handlers.
+- **Context** is passed through like `logger.Ctx()`: `ContextWithFields` and
+  `WithContextFieldExtractor` (e.g. OTel `trace_id`/`span_id`) apply to
+  `slog.*Context` calls.
+- **Time** is the slog record time. **Caller** (with `WithCaller`) is the slog
+  call site taken from the record's PC; `WithCallerSkip` does not apply.
+
+`contrib/loggers/slog.NewSink` is an older variant of the same idea without
+context, caller or error-kind support; prefer `xlog.NewSlogHandler`.
+
 ## HTTP middleware
 
 ```go

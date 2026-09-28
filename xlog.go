@@ -255,13 +255,20 @@ func (l *Logger) logContext(ctx context.Context, level Level, msg string, fields
 	if !c.Enabled(level) {
 		return
 	}
+	_ = l.writeContext(c, ctx, time.Time{}, level, msg, l.attachExtras(level, fields))
+}
+
+// writeContext resolves the context fields (ContextWithFields and the
+// configured extractor) and writes the event. A zero t lets the core stamp the
+// time. fields must already carry the logger extras.
+func (l *Logger) writeContext(c Core, ctx context.Context, t time.Time, level Level, msg string, fields []Field) error {
 	ctxFields := FieldsFromContext(ctx)
 	if l.ctxExtractor != nil {
 		ctxFields = append(ctxFields, l.ctxExtractor(ctx)...)
 	}
-	fields = l.attachExtras(level, fields)
-	_ = c.Write(Event{
+	return c.Write(Event{
 		Ctx:     ctx,
+		Time:    t,
 		Level:   level,
 		Message: msg,
 		Context: ctxFields,
@@ -276,11 +283,22 @@ func (l *Logger) attachExtras(level Level, fields []Field) []Field {
 	if l == nil {
 		return fields
 	}
+	caller := ""
+	if l.caller {
+		caller = callerString(l.callerSkip + 3)
+	}
+	return l.appendExtras(level, fields, caller)
+}
+
+// appendExtras is attachExtras with the caller already resolved: caller is
+// written when the logger records callers and caller is non-empty.
+func (l *Logger) appendExtras(level Level, fields []Field, caller string) []Field {
+	withCaller := l.caller && caller != ""
 	extras := 0
 	if l.name != "" {
 		extras++
 	}
-	if l.caller {
+	if withCaller {
 		extras++
 	}
 	if l.stacktrace && level >= l.stacktraceLevel {
@@ -294,8 +312,8 @@ func (l *Logger) attachExtras(level Level, fields []Field) []Field {
 	if l.name != "" {
 		out = append(out, String(FieldLogger, l.name))
 	}
-	if l.caller {
-		out = append(out, String("caller", callerString(l.callerSkip+3)))
+	if withCaller {
+		out = append(out, String("caller", caller))
 	}
 	if l.stacktrace && level >= l.stacktraceLevel {
 		out = append(out, String("stacktrace", string(debug.Stack())))
@@ -316,6 +334,11 @@ func callerString(skip int) string {
 	if !ok {
 		return "unknown"
 	}
+	return formatCaller(file, line)
+}
+
+// formatCaller renders "dir/file.go:line", keeping the last two path elements.
+func formatCaller(file string, line int) string {
 	parts := strings.Split(filepath.ToSlash(file), "/")
 	if len(parts) > 2 {
 		file = strings.Join(parts[len(parts)-2:], "/")
