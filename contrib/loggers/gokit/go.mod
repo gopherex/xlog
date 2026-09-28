@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-kit/log v0.2.1
-	github.com/gopherex/xlog v1.0.2
+	github.com/gopherex/xlog v1.1.0
 )
 
 require (
