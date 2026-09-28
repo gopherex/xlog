@@ -99,9 +99,7 @@ func (c *Core) Write(event core.Event) error {
 	if event.Time.IsZero() {
 		event.Time = c.now()
 	}
-	if len(c.context) != 0 {
-		event.Context = c.context
-	}
+	event.Context = mergeContext(c.context, event.Context)
 	c.mu.Lock()
 	c.buf = c.encoder.Encode(c.buf[:0], event)
 	c.buf = append(c.buf, '\n')
@@ -126,4 +124,19 @@ func (c *Core) Sync() error {
 		return s.Sync()
 	}
 	return nil
+}
+
+// mergeContext prepends the core's static fields (WithFields / With) to the
+// per-event context fields (ContextWithFields, context field extractor). It
+// never writes into either input's backing array.
+func mergeContext(static, perEvent []field.Field) []field.Field {
+	switch {
+	case len(static) == 0:
+		return perEvent
+	case len(perEvent) == 0:
+		return static
+	}
+	out := make([]field.Field, 0, len(static)+len(perEvent))
+	out = append(out, static...)
+	return append(out, perEvent...)
 }

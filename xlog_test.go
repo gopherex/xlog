@@ -808,3 +808,35 @@ func TestConsoleDurationNanos(t *testing.T) {
 		}
 	}
 }
+
+// Context fields (ContextWithFields and WithContextFieldExtractor) must survive
+// when the built-in core also carries static fields (WithFields / With).
+func TestContextFieldsKeptWithStaticFields(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mk   func(...xlog.Option) *xlog.Logger
+	}{
+		{"json", xlog.NewJSON},
+		{"console", xlog.NewConsole},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			logger := tc.mk(
+				xlog.WithWriter(&out),
+				xlog.WithFields(xlog.String("service", "api")),
+				xlog.WithContextFieldExtractor(func(context.Context) []xlog.Field {
+					return []xlog.Field{xlog.String("trace_id", "abc")}
+				}),
+			).With(xlog.String("component", "db"))
+			ctx := xlog.ContextWithFields(context.Background(), xlog.String("request_id", "r1"))
+
+			logger.Ctx().Info(ctx, "m")
+
+			for _, want := range []string{"service", "component", "trace_id", "request_id"} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("missing %q in %q", want, out.String())
+				}
+			}
+		})
+	}
+}
