@@ -127,7 +127,13 @@ func (c *Core) With(fields []field.Field) core.Core {
 		return c
 	}
 
+	// Copy under the shared mutex: Write replaces c.buf while holding it,
+	// and the child gets its own buffer instead of aliasing the parent's.
+	c.mu.Lock()
 	next := *c
+	c.mu.Unlock()
+
+	next.buf = nil
 	next.context = make([]field.Field, 0, len(c.context)+len(fields))
 	next.context = append(next.context, c.context...)
 	next.context = append(next.context, fields...)
