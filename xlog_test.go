@@ -739,3 +739,72 @@ func TestLoggerLevelAtomicReflectsSet(t *testing.T) {
 		t.Fatalf("Level() after Set = %v, want debug", got)
 	}
 }
+
+func durationFields() []xlog.Field {
+	return []xlog.Field{
+		xlog.Duration("in", time.Second),
+		xlog.Any("any", 1500*time.Millisecond),
+		xlog.Generic("custom", 1500*time.Microsecond, func(enc xlog.FieldEncoder, key string, d time.Duration) {
+			enc.Duration(key, d)
+		}),
+	}
+}
+
+func TestJSONDurationDefaultsToString(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(xlog.WithWriter(&out), xlog.WithoutPretty())
+	logger.Info("done", durationFields()...)
+
+	line := out.String()
+	for _, want := range []string{`"in":"1s"`, `"any":"1.5s"`, `"custom":"1.5ms"`} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("missing %s in %q", want, line)
+		}
+	}
+}
+
+func TestJSONDurationNanos(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewJSON(
+		xlog.WithWriter(&out),
+		xlog.WithoutPretty(),
+		xlog.WithDurationFormat(xlog.DurationNanos),
+	)
+	logger.Info("done", durationFields()...)
+
+	line := out.String()
+	for _, want := range []string{`"in":1000000000`, `"any":1500000000`, `"custom":1500000`} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("missing %s in %q", want, line)
+		}
+	}
+}
+
+func TestConsoleDurationDefaultsToString(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewConsole(xlog.WithWriter(&out))
+	logger.Info("done", durationFields()...)
+
+	line := out.String()
+	for _, want := range []string{"in=1s", "any=1.5s", "custom=1.5ms"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("missing %s in %q", want, line)
+		}
+	}
+}
+
+func TestConsoleDurationNanos(t *testing.T) {
+	var out bytes.Buffer
+	logger := xlog.NewConsole(
+		xlog.WithWriter(&out),
+		xlog.WithDurationFormat(xlog.DurationNanos),
+	)
+	logger.Info("done", durationFields()...)
+
+	line := out.String()
+	for _, want := range []string{"in=1000000000", "any=1500000000", "custom=1500000"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("missing %s in %q", want, line)
+		}
+	}
+}

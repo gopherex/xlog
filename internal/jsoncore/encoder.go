@@ -11,7 +11,8 @@ import (
 )
 
 type Encoder struct {
-	TimeLayout string
+	TimeLayout     string
+	DurationFormat field.DurationFormat
 }
 
 func NewEncoder() *Encoder {
@@ -32,13 +33,13 @@ func (e *Encoder) write(enc *jx.Encoder, event core.Event) {
 		writeTime(enc, field.TimeKey, event.Time, e.TimeLayout)
 		writeString(enc, field.LevelKey, event.Level.String())
 		writeString(enc, field.MessageKey, event.Message)
-		writeFields(enc, event.Context)
-		writeFields(enc, event.Fields)
+		writeFields(enc, event.Context, e.DurationFormat)
+		writeFields(enc, event.Fields, e.DurationFormat)
 	})
 }
 
-func writeFields(enc *jx.Encoder, fields []field.Field) {
-	fieldEnc := fieldEncoder{enc: enc}
+func writeFields(enc *jx.Encoder, fields []field.Field, durations field.DurationFormat) {
+	fieldEnc := fieldEncoder{enc: enc, durations: durations}
 	for _, f := range fields {
 		if f.Key == "" {
 			continue
@@ -75,7 +76,8 @@ func writeField(enc fieldEncoder, f field.Field) {
 }
 
 type fieldEncoder struct {
-	enc *jx.Encoder
+	enc       *jx.Encoder
+	durations field.DurationFormat
 }
 
 func (e fieldEncoder) String(key, value string) {
@@ -105,7 +107,7 @@ func (e fieldEncoder) Float64(key string, value float64) {
 
 func (e fieldEncoder) Duration(key string, value time.Duration) {
 	e.enc.FieldStart(key)
-	e.enc.Int64(int64(value))
+	writeDuration(e.enc, value, e.durations)
 }
 
 func (e fieldEncoder) Time(key string, value time.Time) {
@@ -123,7 +125,7 @@ func (e fieldEncoder) Error(key string, err error) {
 
 func (e fieldEncoder) Any(key string, value any) {
 	e.enc.FieldStart(key)
-	writeAny(e.enc, value)
+	writeAny(e.enc, value, e.durations)
 }
 
 func (e fieldEncoder) Null(key string) {
@@ -142,7 +144,15 @@ func writeTime(enc *jx.Encoder, key string, value time.Time, layout string) {
 	enc.ByteStr(value.AppendFormat(buf[:0], layout))
 }
 
-func writeAny(enc *jx.Encoder, value any) {
+func writeDuration(enc *jx.Encoder, value time.Duration, format field.DurationFormat) {
+	if format == field.DurationNanos {
+		enc.Int64(int64(value))
+		return
+	}
+	enc.Str(value.String())
+}
+
+func writeAny(enc *jx.Encoder, value any, durations field.DurationFormat) {
 	switch v := value.(type) {
 	case nil:
 		enc.Null()
@@ -175,7 +185,7 @@ func writeAny(enc *jx.Encoder, value any) {
 	case float64:
 		enc.Float64(v)
 	case time.Duration:
-		enc.Int64(int64(v))
+		writeDuration(enc, v, durations)
 	case time.Time:
 		enc.Str(v.Format(time.RFC3339Nano))
 	case error:

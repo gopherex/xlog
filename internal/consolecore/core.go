@@ -69,6 +69,16 @@ func WithTimeLayout(layout string) Option {
 	}
 }
 
+func WithDurationFormat(format field.DurationFormat) Option {
+	return func(c *Core) {
+		encoder, ok := c.encoder.(*Encoder)
+		if !ok {
+			return
+		}
+		encoder.DurationFormat = format
+	}
+}
+
 func WithClock(now func() time.Time) Option {
 	return func(c *Core) { c.now = now }
 }

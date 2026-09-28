@@ -10,7 +10,8 @@ import (
 )
 
 type Encoder struct {
-	TimeLayout string
+	TimeLayout     string
+	DurationFormat field.DurationFormat
 }
 
 func NewEncoder() *Encoder {
@@ -25,12 +26,12 @@ func (e *Encoder) Encode(dst []byte, event core.Event) []byte {
 		dst = append(dst, ' ')
 		dst = append(dst, event.Message...)
 	}
-	dst = appendConsoleFields(dst, event.Context)
-	dst = appendConsoleFields(dst, event.Fields)
+	dst = appendConsoleFields(dst, event.Context, e.DurationFormat)
+	dst = appendConsoleFields(dst, event.Fields, e.DurationFormat)
 	return dst
 }
 
-func appendConsoleFields(dst []byte, fields []field.Field) []byte {
+func appendConsoleFields(dst []byte, fields []field.Field, durations field.DurationFormat) []byte {
 	for _, f := range fields {
 		if f.Key == "" {
 			continue
@@ -38,12 +39,12 @@ func appendConsoleFields(dst []byte, fields []field.Field) []byte {
 		dst = append(dst, ' ')
 		dst = append(dst, f.Key...)
 		dst = append(dst, '=')
-		dst = appendFieldValue(dst, f)
+		dst = appendFieldValue(dst, f, durations)
 	}
 	return dst
 }
 
-func appendFieldValue(dst []byte, f field.Field) []byte {
+func appendFieldValue(dst []byte, f field.Field, durations field.DurationFormat) []byte {
 	switch f.Kind {
 	case field.StringKind:
 		return strconv.AppendQuote(dst, f.StringValue())
@@ -56,7 +57,7 @@ func appendFieldValue(dst []byte, f field.Field) []byte {
 	case field.Float64Kind:
 		return strconv.AppendFloat(dst, f.Float64Value(), 'f', -1, 64)
 	case field.DurationKind:
-		return append(dst, f.DurationValue().String()...)
+		return appendDuration(dst, f.DurationValue(), durations)
 	case field.TimeKind:
 		return strconv.AppendQuote(dst, f.TimeValue().Format(time.RFC3339Nano))
 	case field.ErrorKind:
@@ -65,17 +66,17 @@ func appendFieldValue(dst []byte, f field.Field) []byte {
 		}
 		return append(dst, "null"...)
 	case field.AnyKind:
-		return appendAny(dst, f.AnyValue())
+		return appendAny(dst, f.AnyValue(), durations)
 	case field.CustomKind:
-		return appendCustom(dst, f)
+		return appendCustom(dst, f, durations)
 	default:
 		return append(dst, "null"...)
 	}
 }
 
-func appendCustom(dst []byte, f field.Field) []byte {
+func appendCustom(dst []byte, f field.Field, durations field.DurationFormat) []byte {
 	if value, ok := f.AnyValue().(field.CustomValue); ok && value != nil {
-		enc := captureEncoder{dst: dst}
+		enc := captureEncoder{dst: dst, durations: durations}
 		value.AppendXLog(&enc, f.Key)
 		if enc.hasValue {
 			return enc.dst
@@ -84,7 +85,14 @@ func appendCustom(dst []byte, f field.Field) []byte {
 	return append(dst, "null"...)
 }
 
-func appendAny(dst []byte, value any) []byte {
+func appendDuration(dst []byte, value time.Duration, format field.DurationFormat) []byte {
+	if format == field.DurationNanos {
+		return strconv.AppendInt(dst, int64(value), 10)
+	}
+	return append(dst, value.String()...)
+}
+
+func appendAny(dst []byte, value any, durations field.DurationFormat) []byte {
 	switch v := value.(type) {
 	case nil:
 		return append(dst, "null"...)
@@ -117,7 +125,7 @@ func appendAny(dst []byte, value any) []byte {
 	case float64:
 		return strconv.AppendFloat(dst, v, 'f', -1, 64)
 	case time.Duration:
-		return append(dst, v.String()...)
+		return appendDuration(dst, v, durations)
 	case time.Time:
 		return strconv.AppendQuote(dst, v.Format(time.RFC3339Nano))
 	case error:
@@ -151,8 +159,9 @@ func levelLabel(level core.Level) []byte {
 }
 
 type captureEncoder struct {
-	dst      []byte
-	hasValue bool
+	dst       []byte
+	hasValue  bool
+	durations field.DurationFormat
 }
 
 func (e *captureEncoder) String(_ string, value string) {
@@ -176,7 +185,7 @@ func (e *captureEncoder) Float64(_ string, value float64) {
 	e.hasValue = true
 }
 func (e *captureEncoder) Duration(_ string, value time.Duration) {
-	e.dst = append(e.dst, value.String()...)
+	e.dst = appendDuration(e.dst, value, e.durations)
 	e.hasValue = true
 }
 func (e *captureEncoder) Time(_ string, value time.Time) {
@@ -192,7 +201,7 @@ func (e *captureEncoder) Error(_ string, err error) {
 	e.hasValue = true
 }
 func (e *captureEncoder) Any(_ string, value any) {
-	e.dst = appendAny(e.dst, value)
+	e.dst = appendAny(e.dst, value, e.durations)
 	e.hasValue = true
 }
 func (e *captureEncoder) Null(string) {

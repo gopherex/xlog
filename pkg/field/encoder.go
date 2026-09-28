@@ -18,3 +18,14 @@ type Encoder interface {
 	Any(key string, value any)
 	Null(key string)
 }
+
+// DurationFormat selects how built-in encoders render time.Duration values.
+type DurationFormat uint8
+
+const (
+	// DurationString renders durations via time.Duration.String ("1.5s").
+	// This is the zero value and the default.
+	DurationString DurationFormat = iota
+	// DurationNanos renders durations as integer nanoseconds (1500000000).
+	DurationNanos
+)

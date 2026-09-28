@@ -402,6 +402,9 @@ use (
 - `xlog.WithWriter(writer)` / `xlog.WithSink(writer)`
 - `xlog.WithFields(fields...)`
 - `xlog.WithClock(func() time.Time)` / `xlog.WithTimeLayout(layout)`
+- `xlog.WithDurationFormat(format)` — how the built-in JSON/console encoders
+  write `time.Duration`: `xlog.DurationString` (default, `"in":"1.5s"`) or
+  `xlog.DurationNanos` (integer nanoseconds, `"in":1500000000`)
 - `xlog.WithEncoder(encoder)` / `xlog.WithCore(core)`
 - `xlog.WithObserver(observer)`
 - `xlog.WithCaller(true)` / `xlog.WithCallerSkip(skip)`

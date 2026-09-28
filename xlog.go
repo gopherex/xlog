@@ -37,6 +37,8 @@ type (
 	Observer     = xcore.Observer
 	AsyncPolicy  = xcore.AsyncPolicy
 
+	DurationFormat = xfield.DurationFormat
+
 	Field        = xfield.Field
 	FieldEncoder = xfield.Encoder
 )
@@ -52,6 +54,9 @@ const (
 	AsyncBlock      = xcore.AsyncBlock
 	AsyncDropNewest = xcore.AsyncDropNewest
 	AsyncDropOldest = xcore.AsyncDropOldest
+
+	DurationString = xfield.DurationString
+	DurationNanos  = xfield.DurationNanos
 
 	FieldTime    = xfield.TimeKey
 	FieldLevel   = xfield.LevelKey
@@ -569,6 +574,7 @@ type Config struct {
 	Fields           []Field
 	Clock            func() time.Time
 	TimeLayout       string
+	DurationFormat   DurationFormat
 	Encoder          Encoder
 	Core             Core
 	Observer         Observer
@@ -645,6 +651,13 @@ func WithEncoder(encoder Encoder) Option      { return func(c *Config) { c.Encod
 func WithCore(core Core) Option               { return func(c *Config) { c.Core = core } }
 func WithObserver(observer Observer) Option   { return func(c *Config) { c.Observer = observer } }
 
+// WithDurationFormat selects how the built-in JSON and console encoders render
+// time.Duration values: DurationString ("1.5s", the default) or DurationNanos
+// (integer nanoseconds). Custom encoders set via WithEncoder are unaffected.
+func WithDurationFormat(format DurationFormat) Option {
+	return func(c *Config) { c.DurationFormat = format }
+}
+
 // WithContextFieldExtractor registers a function that derives extra fields from
 // the context on every ContextLogger call (Info(ctx, ...) etc.). Use it to
 // attach request-scoped data such as OTel trace_id/span_id to each log without
@@ -699,6 +712,7 @@ func buildCore(format string, cfg Config) Core {
 		if cfg.TimeLayout != "" {
 			opts = append(opts, consolecore.WithTimeLayout(cfg.TimeLayout))
 		}
+		opts = append(opts, consolecore.WithDurationFormat(cfg.DurationFormat))
 		if cfg.Encoder != nil {
 			opts = append(opts, consolecore.WithEncoder(cfg.Encoder))
 		}
@@ -712,6 +726,7 @@ func buildCore(format string, cfg Config) Core {
 		if cfg.TimeLayout != "" {
 			opts = append(opts, jsoncore.WithTimeLayout(cfg.TimeLayout))
 		}
+		opts = append(opts, jsoncore.WithDurationFormat(cfg.DurationFormat))
 		if cfg.Encoder != nil {
 			opts = append(opts, jsoncore.WithEncoder(cfg.Encoder))
 		}
