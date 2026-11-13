@@ -219,6 +219,32 @@ xlog.ErrorChain(err)
 xlog.Errors("errs", errs)
 ```
 
+## Rendering errors for telemetry
+
+Error texts can carry what must not reach a log: a `*url.Error` holds the full
+URL (presigned signatures, tokens in the query), a PostgreSQL error the row
+values. Set a renderer once on the root logger; every error it writes goes
+through it, and derived loggers inherit it:
+
+```go
+render := xlog.NewErrorRenderer(xlog.RedactURL, xlogpgx.RedactPgError)
+logger := xlog.NewJSON(xlog.WithErrorRenderer(render))
+```
+
+- A `Redactor` rewrites one error layer it recognizes. The renderer walks the
+  chain, so `fmt.Errorf("load user: %w", err)` keeps `load user: ` and
+  `errors.Join` keeps one line per error; only matching layers change.
+- `RedactURL`: `*url.Error` → `Get "https://host": <cause>` (no user info,
+  path or query). `contrib/libs/pgx` `RedactPgError`: `*pgconn.PgError` →
+  `SQLSTATE 23505 constraint users_email_key table users` (no message, detail,
+  hint or where — PostgreSQL puts values there).
+- It covers `Err`/`Error` fields, errors in `Any`, `ErrorChain`, `Errors`,
+  `With`, context fields, root `WithFields`, checked entries and the slog
+  handler. Only the text is rendered: the field still unwraps to the original,
+  so `errors.Is`/`As` keep working.
+- Pass the same function to `xtrace.WithErrorRenderer` so spans render errors
+  the same way.
+
 ## Custom fields
 
 ```go

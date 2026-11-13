@@ -134,6 +134,7 @@ type Logger struct {
 	callerSkip      int
 	stacktrace      bool
 	stacktraceLevel Level
+	render          func(error) string // error renderer; nil renders err.Error()
 }
 
 // New constructs a Logger. The name is optional and can be set or extended
@@ -177,7 +178,7 @@ func (l *Logger) With(fields ...Field) *Logger {
 		return l
 	}
 	next := l.clone()
-	next.core = l.Core().With(fields)
+	next.core = l.Core().With(renderFields(fields, l.render))
 	return next
 }
 
@@ -243,7 +244,7 @@ func (l *Logger) log(level Level, msg string, fields []Field) {
 	if !c.Enabled(level) {
 		return
 	}
-	fields = l.attachExtras(level, fields)
+	fields = renderFields(l.attachExtras(level, fields), l.render)
 	_ = c.Write(Event{Level: level, Message: msg, Fields: fields})
 }
 
@@ -271,8 +272,8 @@ func (l *Logger) writeContext(c Core, ctx context.Context, t time.Time, level Le
 		Time:    t,
 		Level:   level,
 		Message: msg,
-		Context: ctxFields,
-		Fields:  fields,
+		Context: renderFields(ctxFields, l.render),
+		Fields:  renderFields(fields, l.render),
 	})
 }
 
@@ -359,6 +360,7 @@ type CheckedEntry struct {
 	callerSkip      int
 	stacktrace      bool
 	stacktraceLevel Level
+	render          func(error) string
 }
 
 func (l *Logger) Check(level Level, msg string) *CheckedEntry {
@@ -375,6 +377,7 @@ func (l *Logger) Check(level Level, msg string) *CheckedEntry {
 		callerSkip:      l.callerSkip,
 		stacktrace:      l.stacktrace,
 		stacktraceLevel: l.stacktraceLevel,
+		render:          l.render,
 	}
 }
 
@@ -406,7 +409,7 @@ func (e *CheckedEntry) Write(fields ...Field) {
 		}
 		fields = out
 	}
-	_ = e.core.Write(Event{Level: e.level, Message: e.message, Fields: fields})
+	_ = e.core.Write(Event{Level: e.level, Message: e.message, Fields: renderFields(fields, e.render)})
 }
 
 func (l *Logger) CheckTrace(msg string) *CheckedEntry    { return l.Check(TraceLevel, msg) }
@@ -551,27 +554,26 @@ func Email(key, value string) Field {
 
 func ErrorCause(err error) Field { return Error("error_cause", deepestError(err)) }
 
+// ErrorChain lists the text of every layer of err. The texts are produced at
+// write time, through the logger's error renderer.
 func ErrorChain(err error) Field {
 	if err == nil {
 		return Any("error_chain", nil)
 	}
-	var chain []string
-	for current := err; current != nil; current = errors.Unwrap(current) {
-		chain = append(chain, current.Error())
-	}
-	return Any("error_chain", chain)
+	return Any("error_chain", errChain(err))
 }
 
+// Errors lists the texts of errs (nil entries skipped), produced at write
+// time through the logger's error renderer.
 func Errors(key string, errs []error) Field {
 	if len(errs) == 0 {
 		return Any(key, nil)
 	}
-	out := make([]string, 0, len(errs))
+	out := make(errorTexts, 0, len(errs))
 	for _, err := range errs {
-		if err == nil {
-			continue
+		if err != nil {
+			out = append(out, err)
 		}
-		out = append(out, err.Error())
 	}
 	return Any(key, out)
 }
@@ -601,6 +603,7 @@ type Config struct {
 	Encoder          Encoder
 	Core             Core
 	Observer         Observer
+	ErrorRenderer    func(error) string
 	ContextFields    func(context.Context) []Field
 	Caller           bool
 	CallerSkip       int
@@ -646,8 +649,10 @@ func newLogger(format string, opts ...Option) *Logger {
 	for _, opt := range opts {
 		opt(&cfg)
 	}
+	cfg.Fields = renderFields(cfg.Fields, cfg.ErrorRenderer)
 	c := buildCore(format, cfg)
 	logger := New(c)
+	logger.render = cfg.ErrorRenderer
 	logger.level = cfg.Level
 	logger.leveler = cfg.Leveler
 	logger.ctxExtractor = cfg.ContextFields
