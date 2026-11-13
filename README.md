@@ -235,7 +235,9 @@ logger := xlog.NewJSON(xlog.WithErrorRenderer(render))
   chain, so `fmt.Errorf("load user: %w", err)` keeps `load user: ` and
   `errors.Join` keeps one line per error; only matching layers change.
 - `RedactURL`: `*url.Error` → `Get "https://host": <cause>` (no user info,
-  path or query). `contrib/libs/pgx` `RedactPgError`: `*pgconn.PgError` →
+  path, query or fragment). A URL `url.Parse` rejects is cut by hand to its
+  `scheme://host`, and one without that shape renders as `<invalid-url>`: the
+  raw URL never passes. `contrib/libs/pgx` `RedactPgError`: `*pgconn.PgError` →
   `SQLSTATE 23505 constraint users_email_key table users` (no message, detail,
   hint or where — PostgreSQL puts values there).
 - It covers `Err`/`Error` fields, errors in `Any`, `ErrorChain`, `Errors`,

@@ -64,6 +64,54 @@ func TestErrorRenderer(t *testing.T) {
 	}
 }
 
+// RedactURL never lets the raw URL through, whatever the URL looks like: a
+// URL url.Parse rejects keeps only a hand-cut scheme://host, or a placeholder.
+func TestRedactURLNeverLeaksRawURL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{name: "valid", raw: "https://host/private/file?signature=secret", want: `Get "https://host": ` + context.DeadlineExceeded.Error()},
+		{name: "malformed escape in the query", raw: "https://host/private/file?signature=secret%zz", want: `Get "https://host": ` + context.DeadlineExceeded.Error()},
+		{name: "malformed with user info", raw: "https://user:secret@host:8443/p%zz?token=secret", want: `Get "https://host:8443": ` + context.DeadlineExceeded.Error()},
+		{name: "malformed host", raw: "https://ho%zzst/p?token=secret", want: `Get "https://ho%zzst": ` + context.DeadlineExceeded.Error()},
+		{name: "no scheme", raw: "host/p?token=secret%zz", want: `Get "<invalid-url>": ` + context.DeadlineExceeded.Error()},
+		{name: "relative", raw: "/p?token=secret", want: `Get "<invalid-url>": ` + context.DeadlineExceeded.Error()},
+		{name: "empty", raw: "", want: `Get "<invalid-url>": ` + context.DeadlineExceeded.Error()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := RedactURL(&url.Error{Op: "Get", URL: tc.raw, Err: context.DeadlineExceeded})
+			if !ok || got != tc.want {
+				t.Fatalf("RedactURL = %q, %v; want %q", got, ok, tc.want)
+			}
+			if strings.Contains(got, "secret") || strings.Contains(got, "/p") {
+				t.Fatalf("leaked: %q", got)
+			}
+		})
+	}
+}
+
+// For any input, the rendered origin carries no path, query, fragment or user
+// info: it is a placeholder, or scheme "://" host with none of '/', '?', '#',
+// '@' after the separator.
+func FuzzURLOrigin(f *testing.F) {
+	for _, seed := range []string{signed, "https://host/p?signature=secret%zz", "https://u:p@h/%zz?t=1",
+		"https://ho%zzst/p", "host/p", "/p?q", "", "://", "a://@/", "http://[::1]:80/p?q", "x://h#frag"} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, raw string) {
+		got := urlOrigin(raw)
+		if got == invalidURL {
+			return
+		}
+		_, host, ok := strings.Cut(got, "://")
+		if !ok || strings.ContainsAny(host, "/?#@") {
+			t.Fatalf("urlOrigin(%q) = %q", raw, got)
+		}
+	})
+}
+
 // Every way an error reaches the logger is rendered; the logged error still
 // unwraps to the original.
 func TestLoggerRendersErrors(t *testing.T) {

@@ -61,17 +61,44 @@ func children(err error) []error {
 func RedactURL(err error) (string, bool) {
 	switch e := err.(type) {
 	case *url.Error:
-		target := e.URL
-		if u, perr := url.Parse(e.URL); perr == nil {
-			target = u.Scheme + "://" + u.Host
-		}
 		cause := ""
 		if e.Err != nil {
 			cause = e.Err.Error()
 		}
-		return e.Op + ` "` + target + `": ` + cause, true
+		return e.Op + ` "` + urlOrigin(e.URL) + `": ` + cause, true
 	}
 	return "", false
+}
+
+// invalidURL stands for a URL with no recognizable scheme://host.
+const invalidURL = "<invalid-url>"
+
+// urlOrigin returns scheme://host of raw and never anything else of it: a URL
+// url.Parse rejects is cut by hand (authority up to the first '/', '?' or '#',
+// user info dropped), and one without a scheme://host is invalidURL. The raw
+// string itself is never returned.
+func urlOrigin(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		if u.Scheme == "" || u.Host == "" {
+			return invalidURL
+		}
+		return u.Scheme + "://" + u.Host
+	}
+	scheme, rest, ok := strings.Cut(raw, "://")
+	if !ok || scheme == "" || strings.ContainsAny(scheme, "/?#@") {
+		return invalidURL
+	}
+	host := rest
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if i := strings.LastIndexByte(host, '@'); i >= 0 {
+		host = host[i+1:]
+	}
+	if host == "" {
+		return invalidURL
+	}
+	return scheme + "://" + host
 }
 
 // renderedError carries a rendered text for encoders while unwrapping to the
